@@ -24,15 +24,15 @@ app.use((req, res, next) => {
 });
 
 // Check request params for log route
-app.use("/api/exercise/log", (req, res, next) => {
-  if (!req.query.userId) {
-    return res.json({
-      error: "userId is required!",
-    });
-  } else {
-    return next();
-  }
-});
+// app.use("/api/exercise/log", (req, res, next) => {
+//   if (!req.query.userId) {
+//     return res.json({
+//       error: "userId is required!",
+//     });
+//   } else {
+//     return next();
+//   }
+// });
 
 // Connect to DB
 mongoose.connect(
@@ -80,26 +80,66 @@ app.get("/", (req, res) => {
 });
 
 // All users route
-app.get("/api/exercise/users", async (req, res) => {
+app.get("/api/users", async (req, res) => {
   allUsers = await User.find({}, "username _id");
   res.json(allUsers);
 });
 
 // Exercise log route
-app.get("/api/exercise/log", async (req, res) => {
-  let user = await User.findOne({ _id: req.query.userId }, "username").lean();
-  let responseLog = await Exercise.find(
-    { userId: req.query.userId },
-    "description duration date"
-  ).exec();
+app.get("/api/users/:_id/logs", async (req, res) => {
+  // Query parameters
+  let from = req.query.from ? new Date(req.query.from) : req.query.from;
+  let to = req.query.to ? new Date(req.query.to) : req.query.to;
+  let limit = parseInt(req.query.limit);
+
+  let responseLog;
+  let user;
+
+  try {
+    user = await User.findOne({ _id: req.params._id }, "username").lean();
+  } catch (err) {
+    return res.json({
+      error: err,
+      message: "User id does not exist",
+    });
+  }
+
+  try {
+    if (from && to) {
+      responseLog = await Exercise.find(
+        { userId: req.params._id, date: { $gte: from, $lte: to } },
+        "description duration date"
+      ).limit(limit);
+    } else if (from) {
+      responseLog = await Exercise.find(
+        { userId: req.params._id, date: { $gte: from } },
+        "description duration date"
+      ).limit(limit);
+    } else if (to) {
+      responseLog = await Exercise.find(
+        { userId: req.params._id, date: { $lte: to } },
+        "description duration date"
+      ).limit(limit);
+    } else {
+      responseLog = await Exercise.find(
+        { userId: req.params._id },
+        "description duration date"
+      ).limit(limit);
+    }
+  } catch (err) {
+    return res.json({
+      error: err,
+    });
+  }
 
   user.log = responseLog;
+  user.count = responseLog.length;
 
   res.json(user);
 });
 
 // Create user route
-app.post("/api/exercise/new-user", (req, res) => {
+app.post("/api/users", (req, res) => {
   const username = req.body.username;
 
   // Create record
@@ -122,18 +162,23 @@ app.post("/api/exercise/new-user", (req, res) => {
   );
 });
 
-app.post("/api/exercise/add", async (req, res) => {
-  let user = await User.findOne({ _id: req.body.userId }).exec();
-  // console.log(user);
+app.post("/api/users/:_id/exercises", async (req, res) => {
+  let user = await User.findOne({ _id: req.params._id }, "username _id").lean();
+
+  // console.log(req.body);
 
   let exerciseRecord = {
-    userId: req.body.userId,
+    userId: user._id,
     description: req.body.description,
-    duration: req.body.duration,
+    duration: parseInt(req.body.duration),
     date: req.body.date
       ? new Date(req.body.date).toDateString()
       : new Date().toDateString(),
   };
+
+  user.description = exerciseRecord.description;
+  user.duration = exerciseRecord.duration;
+  user.date = exerciseRecord.date;
 
   // res.json(exerciseRecord);
 
@@ -144,9 +189,18 @@ app.post("/api/exercise/add", async (req, res) => {
         error: err,
       });
     } else {
-      exerciseRecord.username = user.username;
-      return res.json(exerciseRecord);
+      // console.log(user);
+      return res.json(user);
     }
+  });
+});
+
+// Delete all user records
+app.delete("/api/users/delete", (req, res) => {
+  User.deleteMany({}).exec();
+  Exercise.deleteMany({}).exec();
+  res.json({
+    message: "All records deleted!",
   });
 });
 
